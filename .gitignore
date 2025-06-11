@@ -1,12 +1,11 @@
 # IntelliJ / VS Code
 .idea/
-.vscode/
+
 
 # Logs
 *.log
 
-# OS files
-.DS_Store
+
 
 # Build
 target/
@@ -19,4 +18,8 @@ build/
 .env
 
 # Dependency folders
-node_modules/
+**/node_modules/
+# Nhưng không ignore frontend folder
+!frontend-micro/
+frontend-micro/node_modules/
+frontend-micro/dist/
