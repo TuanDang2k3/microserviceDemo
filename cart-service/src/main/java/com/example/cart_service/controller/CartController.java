@@ -32,7 +32,7 @@ public class CartController {
     public ResponseEntity<CartResponse> updateCartItem(
             @PathVariable String userId,
             @PathVariable String productId,
-            @RequestParam Integer quantity) {
+            @RequestBody Integer quantity) {
         CartResponse cart = cartService.updateCartItem(userId, productId, quantity);
         return ResponseEntity.ok(cart);
     }

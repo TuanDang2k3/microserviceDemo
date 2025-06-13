@@ -213,6 +213,33 @@ public class OrderService {
         return mapOrderToResponse(order);
     }
 
+
+    @Transactional(readOnly = true)
+    public List<OrderResponse> getAllOrders() {
+        log.info("Fetching all orders for admin");
+        List<Order> orders = orderRepository.findAllByOrderByCreatedAtDesc();
+        return orders.stream()
+                .map(this::mapOrderToResponse)
+                .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public List<OrderResponse> getOrdersByStatus(String status) {
+        log.info("Fetching orders by status: {}", status);
+
+        OrderStatus orderStatus;
+        try {
+            orderStatus = OrderStatus.valueOf(status.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            log.error("Invalid order status: {}", status);
+            throw new IllegalArgumentException("Invalid order status: " + status);
+        }
+
+        List<Order> orders = orderRepository.findByStatusOrderByCreatedAtDesc(orderStatus);
+        return orders.stream()
+                .map(this::mapOrderToResponse)
+                .collect(Collectors.toList());
+    }
     private void reduceProductStock(Order order) {
         for (OrderItem item : order.getItems()) {
             try {

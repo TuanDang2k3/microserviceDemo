@@ -54,9 +54,36 @@ public class OrderController {
                 .result(orders)
                 .build());
     }
+    @GetMapping
+    public ResponseEntity<ApiResponse<List<OrderResponse>>> getAllOrders() {
+        log.info("Received request to get all orders (Admin)");
+        List<OrderResponse> orders = orderService.getAllOrders();
 
+        return ResponseEntity.ok(ApiResponse.<List<OrderResponse>>builder()
+                .code(0)
+                .message("All orders retrieved successfully")
+                .result(orders)
+                .build());
+    }
     @PostMapping("/{orderId}/status")
     public ResponseEntity<ApiResponse<OrderResponse>> updateOrderStatus(
+            @PathVariable String orderId,
+            @RequestParam String status,
+            @RequestParam(required = false) String transactionId) {
+
+        log.info("Received request to update order status: {}, status: {}, transactionId: {}",
+                orderId, status, transactionId);
+
+        OrderResponse updatedOrder = orderService.updateOrderStatus(orderId, status, transactionId);
+
+        return ResponseEntity.ok(ApiResponse.<OrderResponse>builder()
+                .code(0)
+                .message("Order status updated successfully")
+                .result(updatedOrder)
+                .build());
+    }
+    @PostMapping("/{orderId}/status123")
+    public ResponseEntity<ApiResponse<OrderResponse>> updateOrderStatusLegacy(
             @PathVariable String orderId,
             @RequestParam String status,
             @RequestParam(required = false) String transactionId) {
