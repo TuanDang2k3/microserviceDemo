@@ -21,6 +21,12 @@ import lombok.experimental.FieldDefaults;
 public class AuthenticationController {
     AuthenticationService authenticationService;
 
+    @PostMapping("/login")
+    ApiResponse<AuthenticationResponse> login(@RequestBody AuthenticationRequest request) {
+        var result = authenticationService.authenticate(request);
+        return ApiResponse.<AuthenticationResponse>builder().result(result).build();
+    }
+
     @PostMapping("/token")
     ApiResponse<AuthenticationResponse> authenticate(@RequestBody AuthenticationRequest request) {
         var result = authenticationService.authenticate(request);

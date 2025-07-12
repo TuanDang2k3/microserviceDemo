@@ -1,6 +1,6 @@
 package com.example.cart_service.service;
 
-import com.example.cart_service.client.ProductServiceClient;
+import com.example.cart_service.client.ProductFeignClient;
 import com.example.cart_service.dto.request.AddItemRequest;
 import com.example.cart_service.dto.response.CartItemResponse;
 import com.example.cart_service.dto.response.CartResponse;
@@ -9,7 +9,12 @@ import com.example.cart_service.entity.Cart;
 import com.example.cart_service.entity.CartItem;
 import com.example.cart_service.repository.CartItemRepository;
 import com.example.cart_service.repository.CartRepository;
+
+import feign.FeignException;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,88 +27,102 @@ import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class CartService {
     private final CartRepository cartRepository;
     private final CartItemRepository cartItemRepository;
-    private final ProductServiceClient productServiceClient;
+    private final ProductFeignClient productFeignClient; 
 
+    /**
+     * Lấy userId từ SecurityContext (được set bởi UserContextFilter)
+     */
+    private String getCurrentUserId() {
+        var authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication != null && authentication.getName() != null) {
+            log.debug("Current userId from SecurityContext: {}", authentication.getName());
+            return authentication.getName();
+        }
+        log.error("❌ No userId found in SecurityContext");
+        throw new RuntimeException("User not authenticated");
+    }
+
+
+    /**
+     * Lấy giỏ hàng của user hiện tại (từ SecurityContext)
+     */
     @Transactional(readOnly = true)
-    public CartResponse getCartByUserId(String userId) {
+    public CartResponse getCurrentUserCart() {
+        String userId = getCurrentUserId();
+        log.info("Getting cart for userId: {}", userId);
+        
         Cart cart = cartRepository.findByUserId(userId)
                 .orElse(Cart.builder().userId(userId).items(new ArrayList<>()).build());
 
         return mapToCartResponse(cart);
     }
 
+    
     @Transactional
-    public CartResponse addItemToCart(String userId, AddItemRequest request) {
-        System.out.println("==================================================");
-        System.out.println("BẮT ĐẦU THÊM SẢN PHẨM VÀO GIỎ HÀNG");
-        System.out.println("UserId: " + userId);
-        System.out.println("ProductId: " + request.getProductId());
-        System.out.println("Quantity: " + request.getQuantity());
+    public CartResponse addItemToCart(AddItemRequest request) {
+        String userId = getCurrentUserId();
+        log.info("=== ADDING ITEM TO CART ===");
+        log.info("UserId: {}", userId);
+        log.info("ProductId: {}", request.getProductId());
+        log.info("Quantity: {}", request.getQuantity());
 
         // Fetch product information
         ProductResponse product = null;
         try {
-            System.out.println("Trước khi gọi productServiceClient.getProduct()");
-            product = productServiceClient.getProduct(request.getProductId());
-            System.out.println("Sau khi gọi productServiceClient.getProduct()");
-            System.out.println("Product đã lấy được: " + (product != null));
-
-            if (product != null) {
-                System.out.println("Product details:");
-                System.out.println("- ID: " + product.getId());
-                System.out.println("- Name: " + product.getName());
-                System.out.println("- Price: " + product.getPrice());
-                System.out.println("- Available: " + product.isAvailable());
+            log.info("Calling productFeignClient.getProduct()");
+            var response = productFeignClient.getProduct(request.getProductId());
+            
+            if (response != null && response.getResult() != null) {
+                product = response.getResult();
+                log.info("Product fetched successfully: {}", product.getName());
+            } else {
+                log.error("Product response is null");
+                throw new RuntimeException("Product not found");
             }
 
-        } catch (ServiceUnavailableException e) {
-            System.out.println("LỖI ServiceUnavailableException: " + e.getMessage());
-            e.printStackTrace();
-            throw new RuntimeException(e);
+        } catch (FeignException.ServiceUnavailable e) {
+            log.error("Product service unavailable: {}", e.getMessage());
+            throw new RuntimeException("Product service unavailable: " + e.getMessage());
+        } catch (FeignException e) {
+            log.error("Error calling product service: {}", e.getMessage());
+            throw new RuntimeException("Error calling product service: " + e.getMessage());
         } catch (Exception e) {
-            System.out.println("LỖI không xác định: " + e.getMessage());
-            e.printStackTrace();
-            throw new RuntimeException("Lỗi không xác định: " + e.getMessage());
+            log.error("Unexpected error: {}", e.getMessage());
+            throw new RuntimeException("Unexpected error: " + e.getMessage());
         }
 
         if (product == null) {
-            System.out.println("CẢNH BÁO: Product là NULL");
+            log.error("Product is null");
             throw new RuntimeException("Product not found");
         }
 
         if (!product.isAvailable()) {
-            System.out.println("CẢNH BÁO: Product is not available (available = false)");
+            log.error("Product is not available");
             throw new RuntimeException("Product is not available");
         }
 
-        System.out.println("Sản phẩm hợp lệ, tiếp tục xử lý...");
-
         // Get or create cart
-        System.out.println("Tìm hoặc tạo giỏ hàng cho user: " + userId);
         Cart cart = cartRepository.findByUserId(userId)
                 .orElse(Cart.builder().userId(userId).items(new ArrayList<>()).build());
-        System.out.println("CartId: " + cart.getId());
 
         // Check if item already exists in cart
-        System.out.println("Kiểm tra sản phẩm đã tồn tại trong giỏ hàng chưa");
         Optional<CartItem> existingItem = cart.getItems().stream()
                 .filter(item -> item.getProductId().equals(request.getProductId()))
                 .findFirst();
 
         if (existingItem.isPresent()) {
             // Update quantity
-            System.out.println("Sản phẩm đã tồn tại trong giỏ hàng, cập nhật số lượng");
             CartItem item = existingItem.get();
             int oldQuantity = item.getQuantity();
             item.setQuantity(item.getQuantity() + request.getQuantity());
             item.setPrice(product.getPrice());
-            System.out.println("Số lượng cũ: " + oldQuantity + " -> Số lượng mới: " + item.getQuantity());
+            log.info("Updated existing item quantity from {} to {}", oldQuantity, item.getQuantity());
         } else {
             // Create new cart item
-            System.out.println("Thêm sản phẩm mới vào giỏ hàng");
             CartItem newItem = CartItem.builder()
                     .cart(cart)
                     .productId(request.getProductId())
@@ -111,21 +130,22 @@ public class CartService {
                     .price(product.getPrice())
                     .build();
             cart.getItems().add(newItem);
-            System.out.println("Đã thêm sản phẩm mới vào giỏ hàng");
+            log.info("Added new item to cart");
         }
 
-        System.out.println("Lưu giỏ hàng vào database");
         cart = cartRepository.save(cart);
-        System.out.println("Đã lưu giỏ hàng vào database");
+        log.info("✅ Cart saved successfully");
 
-        CartResponse response = mapToCartResponse(cart);
-        System.out.println("KẾT THÚC THÊM SẢN PHẨM VÀO GIỎ HÀNG - THÀNH CÔNG");
-        System.out.println("==================================================");
-        return response;
+        return mapToCartResponse(cart);
     }
-
+ /**
+     * Cập nhật số lượng sản phẩm trong giỏ hàng của user hiện tại
+     */
     @Transactional
-    public CartResponse updateCartItem(String userId, String productId, Integer quantity) {
+    public CartResponse updateCartItem(String productId, Integer quantity) {
+        String userId = getCurrentUserId();
+        log.info("Updating cart item for userId: {}, productId: {}, quantity: {}", userId, productId, quantity);
+        
         Cart cart = cartRepository.findByUserId(userId)
                 .orElseThrow(() -> new RuntimeException("Cart not found"));
 
@@ -136,31 +156,54 @@ public class CartService {
 
         if (quantity <= 0) {
             cart.getItems().remove(itemToUpdate);
+            log.info("Removed item from cart");
         } else {
             itemToUpdate.setQuantity(quantity);
+            log.info("Updated item quantity to {}", quantity);
         }
 
         cart = cartRepository.save(cart);
         return mapToCartResponse(cart);
     }
-
+    
+    /**
+     * Xóa sản phẩm khỏi giỏ hàng của user hiện tại
+     */
     @Transactional
-    public void removeItemFromCart(String userId, String productId) {
+    public void removeItemFromCart(String productId) {
+        String userId = getCurrentUserId();
+        log.info("Removing item from cart for userId: {}, productId: {}", userId, productId);
+        
         Cart cart = cartRepository.findByUserId(userId)
                 .orElseThrow(() -> new RuntimeException("Cart not found"));
 
-        cart.getItems().removeIf(item -> item.getProductId().equals(productId));
-        cartRepository.save(cart);
+        boolean removed = cart.getItems().removeIf(item -> item.getProductId().equals(productId));
+        
+        if (removed) {
+            cartRepository.save(cart);
+            log.info("✅ Item removed from cart");
+        } else {
+            log.warn("Item not found in cart");
+            throw new RuntimeException("Item not found in cart");
+        }
     }
 
+/**
+     * Xóa toàn bộ giỏ hàng của user hiện tại
+     */
     @Transactional
-    public void clearCart(String userId) {
+    public void clearCart() {
+        String userId = getCurrentUserId();
+        log.info("Clearing cart for userId: {}", userId);
+        
         Cart cart = cartRepository.findByUserId(userId)
                 .orElseThrow(() -> new RuntimeException("Cart not found"));
 
         cart.getItems().clear();
         cartRepository.save(cart);
+        log.info("✅ Cart cleared");
     }
+
 
     private CartResponse mapToCartResponse(Cart cart) {
         List<CartItemResponse> itemResponses = cart.getItems().stream()
@@ -182,9 +225,13 @@ public class CartService {
     private CartItemResponse mapToCartItemResponse(CartItem item) {
         ProductResponse product = null;
         try {
-            product = productServiceClient.getProduct(item.getProductId());
-        } catch (ServiceUnavailableException e) {
-            throw new RuntimeException(e);
+             var response = productFeignClient.getProduct(item.getProductId());
+            if (response != null && response.getResult() != null) {
+                product = response.getResult();
+            }
+        } catch (Exception e) {
+            log.error("Error fetching product for cart item: {}", e.getMessage());
+            // Không throw exception, chỉ log lỗi
         }
         BigDecimal subtotal = item.getPrice().multiply(BigDecimal.valueOf(item.getQuantity()));
 

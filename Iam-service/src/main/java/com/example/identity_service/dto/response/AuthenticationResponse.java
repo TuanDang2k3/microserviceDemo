@@ -12,6 +12,7 @@ import lombok.experimental.FieldDefaults;
 @FieldDefaults(level = AccessLevel.PRIVATE)
 public class AuthenticationResponse {
     String token;
-    String userId;
+    String refreshToken;
     Date expiryTime;
+    boolean authenticated;
 }
